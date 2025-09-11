@@ -1,99 +1,105 @@
+# src/load/loader.py
+import json
+import psycopg2
+import psycopg2.extras
 from logging import Logger
 from src.utils.config import Config
 
 class Loader:
-    """
-    A class to load normalized data into Postgres database.
-    """
     def __init__(self, config: Config, logger: Logger):
         self.config = config
         self.logger = logger
-        self.logger.info("Loader initialized with config: %s", config.__dict__)
-        self.logger.info("Loader initialized successfully.")
-        self.engine = None
-        self.connection = None
-        self.cursor = None
         self.table_name = "crossref_data"
+        self.conn = None
+        self.cursor = None
         self.create_table_query = f"""
         CREATE TABLE IF NOT EXISTS {self.table_name} (
             id SERIAL PRIMARY KEY,
+            doi TEXT UNIQUE,
+            type TEXT,
             title TEXT,
-            authors TEXT[],
+            authors JSONB,
             published_date DATE,
-            doi TEXT,
             journal TEXT,
             publisher TEXT,
-            is_referenced_by_count INTEGER,
+            volume TEXT,
+            issue TEXT,
+            page TEXT,
+            print_issn TEXT,
+            electronic_issn TEXT,
+            abstract TEXT,
+            license_url TEXT,
             reference_count INTEGER,
+            is_referenced_by_count INTEGER
         );
         """
         self.insert_query = f"""
-        INSERT INTO {self.table_name} (title, authors, published_date, doi, journal, publisher, is_referenced_by_count, reference_count)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO {self.table_name} (
+            doi, type, title, authors, published_date, journal, publisher,
+            volume, issue, page, print_issn, electronic_issn, abstract, license_url,
+            reference_count, is_referenced_by_count
+        ) VALUES (
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+        )
         ON CONFLICT (doi) DO NOTHING;
         """
-        self.logger.info("Loader initialized with table name: %s", self.table_name)
-        self.logger.info("Loader initialized successfully.")
         self.connect_to_db()
         self.create_table()
 
     def connect_to_db(self):
-        """
-        Connect to the PostgreSQL database.
-        """
         try:
-            import psycopg2
-            from sqlalchemy import create_engine
-
-            # Create a connection string
-            conn_string = f"postgresql://{self.config.db_user}:{self.config.db_password}@{self.config.db_host}:{self.config.db_port}/{self.config.db_name}"
-            self.engine = create_engine(conn_string)
-            self.connection = self.engine.connect()
-            self.cursor = self.connection.cursor()
-            self.logger.info("Connected to the database successfully.")
+            self.conn = psycopg2.connect(
+                host=self.config.db_host,
+                port=self.config.db_port,
+                dbname=self.config.db_name,
+                user=self.config.db_user,
+                password=self.config.db_password
+            )
+            self.cursor = self.conn.cursor()
+            self.logger.info("Connected to Postgres via psycopg2.")
         except Exception as e:
-            self.logger.error(f"Error connecting to the database: {e}")
+            self.logger.error("DB connection error: %s", e)
+            raise
 
     def create_table(self):
-        """
-        Create the table in the database if it doesn't exist.
-        """
         try:
             self.cursor.execute(self.create_table_query)
-            self.connection.commit()
-            self.logger.info("Table created successfully.")
+            self.conn.commit()
+            self.logger.info("Table ensured.")
         except Exception as e:
-            self.logger.error(f"Error creating table: {e}")
-            self.connection.rollback()
-        finally:
-            self.cursor.close()
-            self.connection.close()
-            self.logger.info("Database connection closed.")
-            self.logger.info("Table creation query executed successfully.")
+            self.conn.rollback()
+            self.logger.error("Create table failed: %s", e)
+            raise
 
     def load_data(self, data):
-        """
-        Load normalized data into the database.
-        """
         try:
-            self.cursor = self.connection.cursor()
             for record in data:
+                authors_json = psycopg2.extras.Json(record.get("authors", []))
                 self.cursor.execute(self.insert_query, (
-                    record["title"],
-                    record["authors"],
-                    record["published_date"],
-                    record["doi"],
-                    record["journal"],
-                    record["publisher"],
-                    record["is_referenced_by_count"],
-                    record["reference_count"]
+                    record.get("doi"),
+                    record.get("type"),
+                    record.get("title"),
+                    authors_json,
+                    record.get("published_date"),
+                    record.get("journal"),
+                    record.get("publisher"),
+                    record.get("volume"),
+                    record.get("issue"),
+                    record.get("page"),
+                    record.get("print_issn"),
+                    record.get("electronic_issn"),
+                    record.get("abstract"),
+                    record.get("license_url"),
+                    record.get("reference_count"),
+                    record.get("is_referenced_by_count"),
                 ))
-            self.connection.commit()
-            self.logger.info("Data loaded successfully.")
+            self.conn.commit()
+            self.logger.info("Loaded %d records into %s", len(data), self.table_name)
         except Exception as e:
-            self.logger.error(f"Error loading data: {e}")
-            self.connection.rollback()
+            self.conn.rollback()
+            self.logger.error("Error loading data: %s", e)
+            raise
         finally:
             self.cursor.close()
-            self.connection.close()
-            self.logger.info("Database connection closed.")
+            self.conn.close()
+            self.logger.info("DB connection closed.")

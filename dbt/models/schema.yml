@@ -1,0 +1,19 @@
+version: 2
+
+models:
+  - name: stg_crossref
+    description: "Staging model for CrossRef data"
+    columns:
+      - name: doi
+        tests:
+          - not_null
+          - unique
+      - name: published_date
+        tests:
+          - not_null
+
+  - name: publications_by_publisher
+    description: "Aggregated publications and citations grouped by publisher"
+
+  - name: citations_by_year
+    description: "Citations and publications aggregated by year"

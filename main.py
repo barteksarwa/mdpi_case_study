@@ -1,21 +1,29 @@
 from src.utils.config import Config
 from src.utils.logger import setup_logger
-
 from src.extract.extractor import Extractor
 from src.preprocess.normalizer import Normalizer
 from src.preprocess.deduplicator import Deduplicator
 from src.load.loader import Loader
 
+import os
 import json
 from datetime import datetime
 
+
+try:
+    target_items = int(os.getenv("TARGET_ITEMS", 200))
+except ValueError:
+    print("ERROR: TARGET_ITEMS must be an integer. Using default 200.")
+    target_items = 200
+
+
 config = Config(config={
     "API_ENDPOINT": "https://api.crossref.org/works?sort=published&order=desc&rows=200",
-    "DB_HOST": "localhost",
-    "DB_PORT": 5432,
-    "DB_NAME": "my_database",
-    "DB_USER": "my_user",
-    "DB_PASSWORD": "my_password",
+    "DB_HOST": os.getenv("DB_HOST", "localhost"),
+    "DB_PORT": int(os.getenv("DB_PORT", 5432)),
+    "DB_NAME": os.getenv("DB_NAME", "my_database"),
+    "DB_USER": os.getenv("DB_USER", "my_user"),
+    "DB_PASSWORD": os.getenv("DB_PASSWORD", "my_password"),
     "LOG_FILE": "logs/app.log",
     "LOG_LEVEL": "INFO",
 })
@@ -28,7 +36,7 @@ logger = setup_logger(
 
 # API client for CrossRef works api endpoint
 extract = Extractor(config, logger)
-extract.fetch_and_save_data()
+extract.fetch_and_save_data(target_items=target_items)
 raw_data = extract.extract_raw_data()
 
 normalizer = Normalizer()
@@ -54,7 +62,6 @@ filename = now.strftime("%Y%m%d_%H%M%S") + "_data.json"
 filepath = f"./data/processed/{filename}"
 with open(filepath, "w") as f:
     json.dump(unique_data, f, indent=4)
-
 # Load the data into the database
 loader = Loader(config, logger)
 loader.load_data(unique_data)
